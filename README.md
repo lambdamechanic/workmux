@@ -1408,6 +1408,84 @@ the JSON contract and fail-closed rules.
 
 ---
 
+### `workmux identity <name>`
+
+Reports the durable multiplexer identity of a worktree's window: the session it
+is in, the stable window id, every pane id, and the multiplexer server
+incarnation those ids belong to. Accepts a worktree handle or a branch name.
+
+This is what a supervisor records *before* it starts a process, so that it can
+later ask whether that exact process is still there. Names are not identities —
+terminal integrations rename windows, and window and pane ids are reissued from
+zero when the server restarts, so an id is only meaningful next to the server
+start time it was issued under.
+
+Unlike `workmux status`, this is a plain read: nothing is reconciled and no
+state file is written or deleted, so two calls in a row describe the same world.
+
+#### Options
+
+- `--json`: Output as JSON.
+
+#### Example
+
+```bash
+workmux identity user-auth --json
+```
+
+```json
+{
+  "handle": "user-auth",
+  "branch": "user-auth",
+  "path": "/home/me/project__worktrees/user-auth",
+  "mode": "window",
+  "backend": "tmux",
+  "server_start_time": "1786066853",
+  "is_open": true,
+  "session": "main",
+  "window_id": "@1861",
+  "window_name": "wm-user-auth",
+  "pane_ids": ["%2319", "%2320"]
+}
+```
+
+A worktree that exists but has no open window is not an error: it reports
+`"is_open": false` with the live fields null, which is a different fact from
+"no such worktree" (which exits non-zero). In session mode the panes are the
+session's and `window_id` is null.
+
+---
+
+### `workmux spawn <name> -- <command...>`
+
+Runs a command as the **foreground process of a pane** that already exists,
+keeping the pane id.
+
+`workmux run` splits a scratch pane and streams the output back, which is the
+right shape for a human asking a question. A supervisor needs the opposite: the
+process must *become* the pane, so that the pane's exit is the process's exit
+and whoever recorded the pane id learns when the command is over. Paired with
+`workmux open --background --no-pane-cmds` and `workmux identity`, that gives a
+two-step launch — reserve the window and record its identity, then start the
+process inside an identity that is already recorded.
+
+#### Options
+
+- `--pane <pane-id>`: Which pane to spawn into. Defaults to the window's first
+  pane. A pane that does not belong to this worktree's window is refused rather
+  than respawned: respawning kills whatever the pane is running.
+- `--json`: Print the resulting identity, plus the `pane_id` spawned into.
+
+#### Example
+
+```bash
+workmux open --background --no-pane-cmds user-auth
+workmux identity user-auth --json       # record this
+workmux spawn user-auth --pane %2319 -- claude -p "fix the failing test"
+```
+
+---
+
 ### `workmux config edit`
 
 Opens the global configuration file (`~/.config/workmux/config.yaml`) in your
@@ -1470,6 +1548,10 @@ worktrees at once.
 - `-e, --prompt-editor`: Open your editor to write the prompt interactively.
 - `--prompt-file-only`: Write the prompt file without injecting it into agent
   commands.
+- `-C, --no-pane-cmds`: Skip the configured pane commands, so the panes open
+  with plain shells. Useful for supervisors that want the window (and its
+  durable ids) to exist before anything runs inside it — see `workmux spawn`.
+- `-b, --background`: Open the window without switching the client to it.
 
 #### What happens
 
