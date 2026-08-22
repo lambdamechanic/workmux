@@ -205,6 +205,7 @@ Monitoring:
   sidebar      Toggle a live agent status sidebar in tmux
   list         List all worktrees [ls]
   path         Get the filesystem path of a worktree
+  identity     Show the durable multiplexer identity of a worktree's window
   status       Query agent status for worktrees
 
 Setup and configuration:
@@ -220,6 +221,7 @@ Agent interaction:
   capture      Capture terminal output from a running agent
   wait         Wait for agents to reach a target status
   run          Run a command in a worktree's window
+  spawn        Run a command as the foreground process of a worktree's pane
   reap-agents  Exit tracked agent processes older than a configured age
 
 Help and updates:
@@ -347,6 +349,14 @@ enum Commands {
         /// Force opening in a new window (creates suffix like -2, -3) instead of switching to existing
         #[arg(long, short = 'n')]
         new: bool,
+
+        /// Skip executing pane commands (panes open with plain shells)
+        #[arg(short = 'C', long)]
+        no_pane_cmds: bool,
+
+        /// Open the window in the background (do not switch to it)
+        #[arg(short = 'b', long = "background")]
+        background: bool,
 
         /// Override the multiplexer mode for this command only
         #[arg(long, value_enum)]
@@ -492,6 +502,44 @@ enum Commands {
         /// Filter by worktree name or branch (supports multiple)
         #[arg(value_parser = WorktreeBranchParser::new())]
         filter: Vec<String>,
+    },
+
+    /// Show the durable multiplexer identity of a worktree's window
+    ///
+    /// Reports the session, the stable window id, the pane ids, and the
+    /// multiplexer server incarnation they belong to. Read-only: nothing is
+    /// reconciled, deleted, or written.
+    Identity {
+        /// Worktree name (directory name) or branch
+        #[arg(value_parser = WorktreeHandleParser::new())]
+        name: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run a command as the foreground process of a worktree's pane
+    ///
+    /// Unlike `run`, which splits a scratch pane, this replaces the pane's
+    /// process while keeping the pane id, so a caller that recorded the id
+    /// beforehand learns from that id when the command exits.
+    Spawn {
+        /// Worktree name (directory name) or branch
+        #[arg(value_parser = WorktreeHandleParser::new())]
+        name: String,
+
+        /// Pane to spawn into (defaults to the window's first pane)
+        #[arg(long)]
+        pane: Option<String>,
+
+        /// Output the resulting identity as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Command to run (everything after --)
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
     },
 
     /// Get the filesystem path of a worktree
@@ -962,6 +1010,8 @@ pub fn run() -> Result<()> {
             run_hooks,
             force_files,
             new,
+            no_pane_cmds,
+            background,
             mode,
             session,
             target_name,
@@ -978,6 +1028,8 @@ pub fn run() -> Result<()> {
                 run_hooks,
                 force_files,
                 new,
+                !no_pane_cmds,
+                !background,
                 mode_override,
                 target_name,
                 parent_session,
@@ -1022,6 +1074,13 @@ pub fn run() -> Result<()> {
         Commands::Rename { names, branch } => command::rename::run(names, branch),
         Commands::List { pr, json, filter } => command::list::run(pr, json, &filter),
         Commands::Path { name } => command::path::run(&name),
+        Commands::Identity { name, json } => command::identity::run(&name, json),
+        Commands::Spawn {
+            name,
+            pane,
+            json,
+            command: parts,
+        } => command::spawn::run(&name, pane.as_deref(), &parts, json),
         Commands::Send { name, text, file } => {
             command::send::run(&name, text.as_deref(), file.as_deref())
         }
