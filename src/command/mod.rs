@@ -4,6 +4,7 @@ pub mod capture;
 pub mod changelog;
 pub mod clipboard_read;
 pub mod close;
+mod codex_quota;
 pub mod config;
 pub mod dashboard;
 pub mod docs;

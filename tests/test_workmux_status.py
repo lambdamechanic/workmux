@@ -5,6 +5,8 @@ Tests output format, JSON mode, filtering, and behavior with real agent state.
 """
 
 import json
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -28,6 +30,147 @@ from .support.agent_state import (
     list_agent_state_files,
     start_active_agent,
 )
+
+
+@pytest.mark.tmux_only
+def test_codex_quota_observation_and_explicit_user_continuation(
+    mux_server: MuxEnvironment, workmux_exe_path: Path, mux_repo_path: Path
+):
+    """A missing Stop hook is observable without sending or changing state."""
+    env = cast(TmuxEnvironment, mux_server)
+    agent = start_active_agent(
+        env, workmux_exe_path, mux_repo_path, "quota-observation", status="working"
+    )
+    error = (
+        "■ You've hit your usage limit. Visit "
+        "https://chatgpt.com/codex/settings/usage to purchase more credits "
+        "or try again at Sep 15th, 2026 1:22 AM."
+    )
+    screen = env.tmp_path / "screen.txt"
+    screen.write_text(
+        f"{error}\n\n› Ask Codex to do anything\n\n  gpt-6-astra high · ~/project\n"
+    )
+    renderer = env.tmp_path / "renderer.sh"
+    received = env.tmp_path / "received.txt"
+    renderer.write_text(
+        f"printf '\\033[2J\\033[H'; cat {shlex.quote(str(screen))}\n"
+        "while IFS= read -r response; do\n"
+        f"  printf '%s\\n' \"$response\" >> {shlex.quote(str(received))}\n"
+        f"  printf '\\033[2J\\033[H'; cat {shlex.quote(str(screen))}\n"
+        "done\n"
+    )
+    env.send_keys(agent.window, f". {shlex.quote(str(renderer))}")
+    assert poll_until(
+        lambda: error
+        in env.tmux(["capture-pane", "-p", "-J", "-t", agent.window]).stdout,
+        timeout=5,
+    )
+    # The command harness uses test:'s current window; keep it on the control
+    # shell rather than letting status commands become renderer input.
+    env.tmux(["select-window", "-t", "test:0"])
+    state_file = list_agent_state_files(env)[0]
+    state = json.loads(state_file.read_text())
+    state["agent_kind"] = "codex"
+    state["command"] = env.tmux(
+        ["display-message", "-p", "-t", agent.window, "#{pane_current_command}"]
+    ).stdout.strip()
+    state_file.write_text(json.dumps(state))
+    original_state = state_file.read_bytes()
+
+    def observation() -> dict:
+        result = run_workmux_command(
+            env, workmux_exe_path, mux_repo_path, f"status --json {agent.branch}"
+        )
+        parsed = json.loads(result.stdout)
+        assert parsed["agents"], (
+            parsed,
+            state_file.read_text(),
+            env.tmux(
+                [
+                    "list-panes",
+                    "-a",
+                    "-F",
+                    "#{pane_id} #{pane_pid} #{pane_current_command}",
+                ]
+            ).stdout,
+        )
+        return parsed["agents"][0]
+
+    # Repeated polling is read-only and cannot duplicate a recovery attempt.
+    for _ in range(2):
+        observed = observation()
+        assert observed["status"] == "quota_wait", (
+            observed,
+            env.tmux(
+                ["capture-pane", "-p", "-e", "-S", "-80", "-t", agent.window]
+            ).stdout,
+        )
+        assert observed["observation"] == "quota_interrupted"
+        assert observed["elapsed_secs"] is None
+        assert observed["workdir"] == str(agent.worktree)
+        assert state_file.read_bytes() == original_state
+        assert not received.exists()
+
+    # An actual user-input hold takes priority even with the same terminal.
+    state["status"] = "waiting"
+    state_file.write_text(json.dumps(state))
+    assert observation()["status"] == "waiting"
+    state["status"] = "done"
+    state_file.write_text(json.dumps(state))
+    assert observation()["status"] == "done"
+    state["status"] = "working"
+    state_file.write_text(json.dumps(state))
+
+    real_tmux = shutil.which("tmux", path=env.env["PATH"])
+    assert real_tmux is not None
+    wrapper_dir = env.tmp_path / "capture-fault-bin"
+    wrapper_dir.mkdir()
+    wrapper = wrapper_dir / "tmux"
+    saved_path = env.env["PATH"]
+    replacement = env.tmp_path / "replacement-state.json"
+    try:
+        env.env["PATH"] = f"{wrapper_dir}:{saved_path}"
+        for fault in ["unavailable", "replaced", "user_hold"]:
+            changed = dict(state)
+            if fault == "replaced":
+                changed["pane_pid"] += 1
+            else:
+                changed["status"] = "waiting"
+            replacement.write_text(json.dumps(changed))
+            action = (
+                "exit 1"
+                if fault == "unavailable"
+                else f"cp {shlex.quote(str(replacement))} {shlex.quote(str(state_file))}"
+            )
+            wrapper.write_text(
+                f'#!/bin/sh\nif [ "$1" = capture-pane ]; then {action}; fi\n'
+                f'exec {shlex.quote(real_tmux)} "$@"\n'
+            )
+            wrapper.chmod(0o755)
+            observed = observation()
+            assert observed["status"] == "unknown", fault
+            assert observed["observation"] == "sensor_unavailable", fault
+            assert not received.exists()
+            state_file.write_bytes(original_state)
+    finally:
+        env.env["PATH"] = saved_path
+
+    # Simulate an explicit operator continuation in the same pane/process.
+    # This does not claim to test a real provider reset or automated recovery.
+    screen.write_text(
+        "• Explored\n  └ Read next-file.rs\n\n• Working (1s • esc to interrupt)\n"
+    )
+    env.send_keys(agent.window, "Continue the unfinished task")
+    assert poll_until(lambda: received.exists(), timeout=5)
+    assert received.read_text() == "Continue the unfinished task\n"
+    assert poll_until(lambda: observation()["status"] == "working", timeout=5)
+
+    # Replaced panes remain the responsibility of native reconciliation.
+    state["pane_pid"] += 1
+    state_file.write_text(json.dumps(state))
+    result = run_workmux_command(env, workmux_exe_path, mux_repo_path, "status --json")
+    assert json.loads(result.stdout)["agents"] == []
+    assert state_file.exists()
 
 
 def test_status_no_agents(
