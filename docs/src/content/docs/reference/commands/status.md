@@ -78,6 +78,56 @@ Each agent contains `worktree`, `branch`, `status`, `elapsed_secs`, `title`,
 `pane_id`, `workdir`, `agent_kind`, `session`, `window_name`, and `updated_ts`.
 With `--git`, it also contains a `git` object.
 
+## Codex quota interruptions
+
+For a tracked Codex agent whose last hook says `working`, status also inspects
+the current terminal. The recognized usage-limit error followed by the empty
+composer is reported as `status: "quota_wait"` with
+`observation: "quota_interrupted"`. This covers a quota interruption that did
+not emit a completion hook. It is not successful completion or a user-input
+request. A later tool/progress block or text in the composer prevents this
+classification. Existing `waiting` and `done` hooks take precedence.
+
+If the live pane cannot be captured with a stable process identity, the entry
+instead reports `status: "unknown"`, `observation: "sensor_unavailable"`.
+Neither result is permission to resume or reap the agent. `elapsed_secs` is
+null for these observations: the previous hook's timestamp does not tell us
+when the error appeared. `updated_ts` remains the original hook timestamp.
+
+This is a conservative observation of the known Codex terminal layout, not a
+Codex protocol event. Unknown layouts retain the hook status; quoted terminal
+content can imitate the UI. The `session` field identifies the multiplexer
+session, not a Codex conversation ID. Status does not write hook state, so
+the dashboard and `wait` still use their hook-based states.
+
+### Explicit recovery
+
+Recovery remains an operator action. Workmux has no authoritative quota-health
+probe or atomic operation to resume a particular interrupted Codex turn.
+An elapsed reset date, a low usage percentage from another account, an empty
+composer, or repeated `quota_wait` observations is insufficient evidence for
+automated input.
+
+1. Obtain fresh quota-recovery evidence for the affected account and model
+   from the provider. Unknown health means keep waiting.
+2. Run `workmux status --json <target>` and `workmux capture <target>` again.
+   Check the worktree and pane identity, confirm the task is still unfinished
+   and authorized, and preserve any user hold, permission request, or drafted
+   input. Stop if the pane/session has changed or the sensor is unavailable.
+3. Return to that original Codex pane and submit one explicit continuation of
+   the unfinished task. Do not launch another agent, replay the original task,
+   or retry Enter in a loop. Use an established delivery-verifying sender only
+   under explicit task-scoped authorization; plain `send` does not verify that
+   Codex accepted a turn.
+4. Capture again and require new assistant/tool progress. A changed hook or a
+   successful input-send command alone is not proof of recovery. If progress
+   cannot be confirmed, stop and inspect; do not submit another continuation.
+
+Unattended recovery requires an authenticated, fresh account/model health
+signal and a Codex conversation/turn identity with conditional, idempotent
+submission and explicit user-hold state. Terminal scraping cannot supply that
+contract. This command deliberately performs no automatic recovery.
+
 ## Safe automation
 
 Check the exit status before interpreting the JSON. Most failures produce no

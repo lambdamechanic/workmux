@@ -10,8 +10,10 @@ use tabled::{
 };
 
 use crate::git;
-use crate::multiplexer::{AgentPane, AgentStatus, create_backend, detect_backend_strict};
-use crate::state::StateStore;
+use crate::multiplexer::{
+    AgentPane, AgentStatus, Multiplexer, create_backend, detect_backend_strict,
+};
+use crate::state::{PaneKey, StateStore};
 use crate::util;
 use crate::workflow;
 
@@ -20,6 +22,8 @@ struct StatusEntry {
     worktree: String,
     branch: String,
     status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observation: Option<CodexObservation>,
     elapsed_secs: Option<u64>,
     title: Option<String>,
     pane_id: String,
@@ -30,6 +34,74 @@ struct StatusEntry {
     updated_ts: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     git: Option<GitInfo>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CodexObservation {
+    /// Current terminal quota error; quota health and resume intent are unknown.
+    QuotaInterrupted,
+    /// A capture could not be attributed to a stable live pane.
+    SensorUnavailable,
+}
+
+fn observe_codex(entry: &mut StatusEntry, capture: impl FnOnce() -> Option<String>) {
+    // A user-input wait and successful completion take precedence over terminal
+    // history. Never reinterpret a missing hook state as an authorized task.
+    if entry.agent_kind.as_deref() != Some("codex") || entry.status != "working" {
+        return;
+    }
+    match capture() {
+        Some(text) if super::codex_quota::is_quota_interruption(&text) => {
+            entry.status = "quota_wait".into();
+            entry.observation = Some(CodexObservation::QuotaInterrupted);
+        }
+        None => {
+            entry.status = "unknown".into();
+            entry.observation = Some(CodexObservation::SensorUnavailable);
+        }
+        Some(_) => return,
+    }
+    // The hook timestamp dates the old working state, not this observation.
+    entry.elapsed_secs = None;
+}
+
+fn capture_stable_pane(
+    mux: &dyn Multiplexer,
+    store: &StateStore,
+    key: &PaneKey,
+    expected_updated_ts: Option<u64>,
+) -> Option<String> {
+    let state = store.get_agent(key).ok()??;
+    if state.status != Some(AgentStatus::Working)
+        || state.agent_kind.as_deref() != Some("codex")
+        || Some(state.updated_ts) != expected_updated_ts
+    {
+        return None;
+    }
+    let pane_id = &key.pane_id;
+    let boot = mux.server_boot_id().ok()?;
+    let before = mux.get_live_pane_info(pane_id).ok()??;
+    if before.pid != Some(state.pane_pid)
+        || before.current_command.as_deref() != Some(&state.command)
+        || state.boot_id != boot
+    {
+        return None;
+    }
+    let text = mux.capture_pane(pane_id, 80)?;
+    let after = mux.get_live_pane_info(pane_id).ok()??;
+    let current_state = store.get_agent(key).ok()??;
+    // A recycled pane must not lend its output to the previous agent. Backends
+    // lacking a process identity cannot provide this stronger observation.
+    (before.pid.is_some()
+        && before.pid == after.pid
+        && before.current_command == after.current_command
+        && before.working_dir == after.working_dir
+        && before.session_id == after.session_id
+        && before.window_id == after.window_id
+        && serde_json::to_value(state).ok()? == serde_json::to_value(current_state).ok()?
+        && boot == mux.server_boot_id().ok()?)
+    .then_some(text)
 }
 
 #[derive(Serialize)]
@@ -157,6 +229,7 @@ fn status_entry(
         worktree,
         branch,
         status: status_label(agent.status),
+        observation: None,
         elapsed_secs: agent.status_ts.map(|ts| now.saturating_sub(ts)),
         title: agent.pane_title.clone(),
         pane_id: agent.pane_id.clone(),
@@ -331,6 +404,18 @@ pub fn run(worktrees: &[String], json: bool, show_git: bool) -> Result<()> {
         }
     }
 
+    for entry in &mut entries {
+        let key = PaneKey {
+            backend: report.backend.clone(),
+            instance: report.instance.clone(),
+            pane_id: entry.pane_id.clone(),
+        };
+        let expected_updated_ts = entry.updated_ts;
+        observe_codex(entry, || {
+            capture_stable_pane(mux.as_ref(), &store, &key, expected_updated_ts)
+        });
+    }
+
     let target_failure_count = target_errors.len();
     if json {
         let output = StatusOutput {
@@ -416,6 +501,60 @@ pub fn run(worktrees: &[String], json: bool, show_git: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(status: &str, kind: &str) -> StatusEntry {
+        StatusEntry {
+            worktree: "task".into(),
+            branch: "task".into(),
+            status: status.into(),
+            observation: None,
+            elapsed_secs: Some(3600),
+            title: None,
+            pane_id: "%1".into(),
+            workdir: PathBuf::from("/repo/task"),
+            agent_kind: Some(kind.into()),
+            session: Some("test".into()),
+            window_name: Some("wm-task".into()),
+            updated_ts: Some(10),
+            git: None,
+        }
+    }
+
+    #[test]
+    fn terminal_observation_preserves_user_waits_done_and_other_agents() {
+        for (status, kind) in [
+            ("waiting", "codex"),
+            ("done", "codex"),
+            ("-", "codex"),
+            ("working", "claude"),
+        ] {
+            let mut value = entry(status, kind);
+            observe_codex(&mut value, || panic!("must not capture this agent"));
+            assert_eq!(value.status, status);
+            assert_eq!(value.elapsed_secs, Some(3600));
+        }
+    }
+
+    #[test]
+    fn failed_sensor_is_unknown_not_working_or_quota_wait() {
+        let mut value = entry("working", "codex");
+        observe_codex(&mut value, || None);
+        assert_eq!(value.status, "unknown");
+        assert_eq!(value.observation, Some(CodexObservation::SensorUnavailable));
+        assert_eq!(value.elapsed_secs, None);
+        assert_eq!(value.updated_ts, Some(10));
+    }
+
+    #[test]
+    fn live_long_tool_keeps_hook_status() {
+        let mut value = entry("working", "codex");
+        observe_codex(&mut value, || {
+            Some("• Working (3600s • esc to interrupt)".into())
+        });
+        assert_eq!(value.status, "working");
+        assert_eq!(value.observation, None);
+        assert_eq!(value.elapsed_secs, Some(3600));
+    }
 
     #[test]
     fn git_info_fails_for_non_repository_path() {
