@@ -542,6 +542,25 @@ enum Commands {
         git: bool,
     },
 
+    /// Inspect native Codex quota recovery prerequisites offline (recovery stays disabled)
+    CodexQuotaCheck {
+        /// Directory from codex app-server generate-json-schema --experimental
+        #[arg(long)]
+        schema_dir: std::path::PathBuf,
+
+        /// Saved native turn/completed notification (observation only)
+        #[arg(long)]
+        turn_event: Option<std::path::PathBuf>,
+
+        /// Saved native thread/read result (observation only)
+        #[arg(long)]
+        thread_response: Option<std::path::PathBuf>,
+
+        /// Saved native account/rateLimits/read result (observation only)
+        #[arg(long)]
+        rate_limits_response: Option<std::path::PathBuf>,
+    },
+
     /// Wait for agents to reach a target status
     Wait {
         /// Worktree names (supports cross-project with project:handle syntax)
@@ -1031,6 +1050,17 @@ pub fn run() -> Result<()> {
             json,
             git,
         } => command::status::run(&worktrees, json, git),
+        Commands::CodexQuotaCheck {
+            schema_dir,
+            turn_event,
+            thread_response,
+            rate_limits_response,
+        } => command::codex_quota_check::run(
+            &schema_dir,
+            turn_event.as_deref(),
+            thread_response.as_deref(),
+            rate_limits_response.as_deref(),
+        ),
         Commands::Wait {
             worktrees,
             status,
