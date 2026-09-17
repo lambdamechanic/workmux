@@ -12,6 +12,8 @@ pub fn run(
     run_hooks: bool,
     force_files: bool,
     new_window: bool,
+    run_pane_commands: bool,
+    focus_window: bool,
     mode_override: Option<MuxMode>,
     target_name: Option<String>,
     parent_session: Option<String>,
@@ -104,9 +106,13 @@ pub fn run(
             None
         };
 
-        // Construct setup options (pane commands always run on open)
-        let mut options = SetupOptions::new(run_hooks, force_files, true);
+        // Pane commands run unless the caller asked for a bare window: an
+        // unattended supervisor opens the window first and starts the process
+        // inside it afterwards, so that the identity it records exists before
+        // anything runs under it.
+        let mut options = SetupOptions::new(run_hooks, force_files, run_pane_commands);
         options.mode = preliminary_mode;
+        options.focus_window = focus_window;
         options.prompt_file_path = prompt_file_path;
         if continue_session {
             options.resume_mode = crate::multiplexer::types::ResumeMode::Continue;

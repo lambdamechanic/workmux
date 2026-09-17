@@ -21,6 +21,22 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
+## Unreleased (lambdamechanic fork)
+
+- New `workmux identity <name>` reports the durable multiplexer identity of a
+  worktree's window: session, stable window id, pane ids, and the server
+  incarnation those ids belong to. Read-only — unlike `status`, it reconciles
+  and deletes nothing. `--json` for machine consumption.
+- New `workmux spawn <name> -- <command...>` runs a command as the foreground
+  process of an existing pane, keeping the pane id, so a caller that recorded
+  the id learns from it when the command exits. `--pane` targets one pane and
+  refuses ids belonging to another window; `--json` reports the identity plus
+  the pane spawned into.
+- `workmux open` accepts `-C, --no-pane-cmds` and `-b, --background`, matching
+  `workmux add`. Together with the two commands above this gives an unattended
+  supervisor a two-step launch: prepare the window and record what it is, then
+  start the process inside an identity that is already recorded.
+
 ## v0.1.244 (2026-08-22)
 
 - `window_prefix` accepts the `{project}` placeholder, which expands to the main
