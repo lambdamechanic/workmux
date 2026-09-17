@@ -1,0 +1,171 @@
+{
+  "provenance": {
+    "codex_version": "0.153.4",
+    "source_revision": "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
+    "command": "codex app-server generate-json-schema --experimental --out DIR",
+    "projection": "Top-level property names (values replaced by empty objects), required fields and the two inspected error/hold enums only. Not a complete protocol schema.",
+    "source_sha256": {
+      "TurnStartParams": "b36fb37326b1cf69f75c8b306f1f886d53a57c4b1b985e08e298e2407ea2ad02",
+      "TurnSteerParams": "2e0cdcea6a90d6c8bc584fdc2ff838e824754b1eef0d2d16aa71bec4276fef44",
+      "ThreadQueueStartParams": "d92f1e985c183fa3f261bbfa004416f0f572a225a53e5de1744682e154cce936",
+      "GetAccountRateLimitsResponse": "a28d4d0e9181a498c58d4ae3b6b49aaa6ee7a33c0c9f81c1ad0bff223bfbbe3b",
+      "TurnCompletedNotification": "78af2a37391e8e669a4020cb58593e4d3e378756ced79d5fec72374fa69fb94b",
+      "ThreadReadResponse": "de0ec065bbe9c6288d76517cbab64949b544074ed782a314ccea872b70bbfa48"
+    }
+  },
+  "schemas": {
+    "TurnStartParams": {
+      "title": "TurnStartParams",
+      "type": "object",
+      "properties": {
+        "additionalContext": {},
+        "approvalPolicy": {},
+        "approvalsReviewer": {},
+        "clientUserMessageId": {},
+        "collaborationMode": {},
+        "cwd": {},
+        "cyberAccessProgram": {},
+        "effort": {},
+        "environments": {},
+        "input": {},
+        "model": {},
+        "multiAgentMode": {},
+        "outputSchema": {},
+        "permissions": {},
+        "personality": {},
+        "responsesapiClientMetadata": {},
+        "runtimeWorkspaceRoots": {},
+        "sandboxPolicy": {},
+        "serviceTier": {},
+        "serviceTierForTurn": {},
+        "summary": {},
+        "threadId": {},
+        "toolOutput": {},
+        "turnTrigger": {}
+      },
+      "required": [
+        "input",
+        "threadId"
+      ]
+    },
+    "TurnSteerParams": {
+      "title": "TurnSteerParams",
+      "type": "object",
+      "properties": {
+        "additionalContext": {},
+        "clientUserMessageId": {},
+        "expectedTurnId": {},
+        "input": {},
+        "responsesapiClientMetadata": {},
+        "threadId": {}
+      },
+      "required": [
+        "expectedTurnId",
+        "input",
+        "threadId"
+      ]
+    },
+    "ThreadQueueStartParams": {
+      "title": "ThreadQueueStartParams",
+      "type": "object",
+      "properties": {
+        "queuedSubmissionId": {},
+        "threadId": {}
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "GetAccountRateLimitsResponse": {
+      "title": "GetAccountRateLimitsResponse",
+      "type": "object",
+      "properties": {
+        "accountId": {},
+        "rateLimitResetCredits": {},
+        "rateLimitUpsell": {},
+        "rateLimits": {},
+        "rateLimitsByLimitId": {}
+      },
+      "required": [
+        "rateLimits"
+      ]
+    },
+    "TurnCompletedNotification": {
+      "title": "TurnCompletedNotification",
+      "type": "object",
+      "properties": {
+        "threadId": {},
+        "turn": {}
+      },
+      "required": [
+        "threadId",
+        "turn"
+      ],
+      "definitions": {
+        "CodexErrorInfo": {
+          "oneOf": [
+            {
+              "enum": [
+                "contextWindowExceeded",
+                "sessionBudgetExceeded",
+                "usageLimitExceeded",
+                "rateLimitExceeded",
+                "serverOverloaded",
+                "cyberPolicy",
+                "misalignmentPolicyViolation",
+                "internalServerError",
+                "unauthorized",
+                "badRequest",
+                "threadRollbackFailed",
+                "sandboxError",
+                "other"
+              ],
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    "ThreadReadResponse": {
+      "title": "ThreadReadResponse",
+      "type": "object",
+      "properties": {
+        "thread": {}
+      },
+      "required": [
+        "thread"
+      ],
+      "definitions": {
+        "CodexErrorInfo": {
+          "oneOf": [
+            {
+              "enum": [
+                "contextWindowExceeded",
+                "sessionBudgetExceeded",
+                "usageLimitExceeded",
+                "rateLimitExceeded",
+                "serverOverloaded",
+                "cyberPolicy",
+                "misalignmentPolicyViolation",
+                "internalServerError",
+                "unauthorized",
+                "badRequest",
+                "threadRollbackFailed",
+                "sandboxError",
+                "other"
+              ],
+              "type": "string"
+            }
+          ]
+        },
+        "ThreadActiveFlag": {
+          "enum": [
+            "waitingOnApproval",
+            "waitingOnUserInput"
+          ],
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -13,6 +13,7 @@ description: Complete reference for all workmux commands
 | [`remove`](/reference/commands/remove/)           | Remove worktrees without merging                    |
 | [`rename`](/reference/commands/rename/)           | Rename a worktree, its tmux window, and branch      |
 | [`list`](/reference/commands/list/)               | List all worktrees with status                      |
+| [`codex-quota-check`](/reference/commands/codex-quota-check/) | Inspect disabled native quota recovery prerequisites |
 | [`status`](/reference/commands/status/)           | Query tracked agent status                          |
 | [`open`](/reference/commands/open/)               | Open a tmux window for an existing worktree         |
 | [`close`](/reference/commands/close/)             | Close a worktree's tmux window (keeps worktree)     |

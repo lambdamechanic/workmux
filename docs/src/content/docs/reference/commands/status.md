@@ -167,3 +167,7 @@ The command fails when it cannot complete the requested observation, including:
 - Git query failures when `--git` is requested
 - missing or ambiguous requested worktrees, reported in `target_errors` when an
   observation can otherwise be completed
+
+Quota observations do not authorize automatic recovery. See
+[`codex-quota-check`](/reference/commands/codex-quota-check/) for the disabled
+native recovery groundwork and its contract blockers.

@@ -5,6 +5,7 @@ pub mod changelog;
 pub mod clipboard_read;
 pub mod close;
 mod codex_quota;
+pub mod codex_quota_check;
 pub mod config;
 pub mod dashboard;
 pub mod docs;
